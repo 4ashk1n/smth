@@ -1,3 +1,15 @@
 [submodule "smth-front"]
 	path = smth-front
 	url = https://github.com/4ashk1n/smth-front.git
+[submodule "smth-shared"]
+	path = smth-shared
+	url = https://github.com/4ashk1n/smth-shared.git
+[submodule "smth-back"]
+	path = smth-back
+	url = https://github.com/4ashk1n/smth-back.git
+[submodule "smth-ai"]
+	path = smth-ai
+	url = https://github.com/4ashk1n/smth-ai.git
+[submodule "smth-front-admin"]
+	path = smth-front-admin
+	url = https://github.com/4ashk1n/smth-front-admin.git
