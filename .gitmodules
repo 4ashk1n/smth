@@ -1,0 +1,3 @@
+[submodule "smth-front"]
+	path = smth-front
+	url = https://github.com/4ashk1n/smth-front.git
