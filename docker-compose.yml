@@ -1,0 +1,149 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: smth-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-smth}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - smth_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-smth}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  ai:
+    build:
+      context: ./smth-ai
+      dockerfile: Dockerfile
+    container_name: smth-ai
+    restart: unless-stopped
+    env_file:
+      - ./smth-ai/ai_module/.env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-smth}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${AI_PORT:-8000}:8000"
+
+  ai-reco-poller:
+    build:
+      context: ./smth-ai
+      dockerfile: Dockerfile
+    container_name: smth-ai-reco-poller
+    restart: unless-stopped
+    env_file:
+      - ./smth-ai/ai_module/.env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-smth}
+    command: ["python", "-m", "ai_module.features.recommendations.jobs.poll_dirty_user_feed"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  ai-reco-recompute:
+    build:
+      context: ./smth-ai
+      dockerfile: Dockerfile
+    container_name: smth-ai-reco-recompute
+    restart: "no"
+    profiles:
+      - jobs
+    env_file:
+      - ./smth-ai/ai_module/.env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-smth}
+    command: ["python", "-m", "ai_module.features.recommendations.jobs.recompute_user_feed"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  ai-reco-recompute-cron:
+    build:
+      context: ./smth-ai
+      dockerfile: Dockerfile
+    container_name: smth-ai-reco-recompute-cron
+    restart: unless-stopped
+    env_file:
+      - ./smth-ai/ai_module/.env
+    environment:
+      TZ: UTC
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-smth}
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          now="$$(date -u +%H:%M)"
+          if [ "$$now" = "00:00" ]; then
+            python -m ai_module.features.recommendations.jobs.recompute_user_feed || true
+            sleep 60
+          fi
+          sleep 20
+        done
+    depends_on:
+      db:
+        condition: service_healthy
+
+  back:
+    build:
+      context: .
+      dockerfile: smth-back/Dockerfile
+    container_name: smth-back
+    restart: unless-stopped
+    env_file:
+      - ./smth-back/.env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-smth}
+      AI_MODULE_BASE_URL: http://ai:8000
+    depends_on:
+      db:
+        condition: service_healthy
+      ai:
+        condition: service_started
+    ports:
+      - "${BACK_PORT:-3000}:3000"
+
+  front:
+    build:
+      context: .
+      dockerfile: smth-front/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:${BACK_PORT:-3000}/api}
+        VITE_S3_IMAGE_PREPARE_PATH: ${VITE_S3_IMAGE_PREPARE_PATH:-}
+        VITE_S3_IMAGE_CONFIRM_PATH: ${VITE_S3_IMAGE_CONFIRM_PATH:-}
+        VITE_S3_PUBLIC_BASE_URL: ${VITE_S3_PUBLIC_BASE_URL:-}
+    container_name: smth-front
+    restart: unless-stopped
+    depends_on:
+      back:
+        condition: service_started
+    ports:
+      - "${FRONT_PORT:-5173}:80"
+
+  front-admin:
+    build:
+      context: .
+      dockerfile: smth-front-admin/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:${BACK_PORT:-3000}/api}
+    container_name: smth-front-admin
+    restart: unless-stopped
+    depends_on:
+      back:
+        condition: service_started
+    ports:
+      - "${FRONT_ADMIN_PORT:-5174}:80"
+
+volumes:
+  smth_postgres_data:
+
